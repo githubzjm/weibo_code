@@ -3,20 +3,9 @@ This file is used to scrapy some information from weibo
 1. use personal cookie to login
 2. use its search engine to search some keyword
 3. scrapy the result and scrapy each user's information (including personal information and all of its blogs) in the search result
-
 '''
-
-
-
-
-
-
-
-
-
 '''
 20171125 version:
-
 1. 改 userinfo 信息 加大V 认证, 加粉丝数量, 加认证的描述, 加关注人数量  1
 2. 改 userinfo 信息 加用户特征标签  1
 3. 加爬评论模块 1
@@ -24,14 +13,12 @@ This file is used to scrapy some information from weibo
 5. 更改结构,爬search info 的repost 和comment 1
 6. 输出按是否大V, 粉丝数量排序 1
 7. search 增加多几页
-
-
-
-
-
-
-
 '''
+
+"""
+2020 10 18 赵家铭
+- 调通代码, scrapy_info_mid()函数可以正常工作：根据mid抓取博主信息、关注者信息、博客信息、博客评论信息、博客转发信息，并存入文件
+"""
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -44,21 +31,65 @@ import numpy as np
 import glob
 # limit = 100
 
+def getFileList(path,start):
+    '''
+    打开文件，将文件中每行存入列表并返回
+    '''
+    with open(path, 'r') as f:
+        fileList = f.readlines()[start:]
+        return fileList
 
+def scrapy_info_mid(keyword, mid_list):
+    '''
+    scrapy info with mid
+    param:
+        keyword: string
+        mid_list: list or DataFrame
+    '''
+    print("scrapy keyword :%s's web info"%(keyword))
+    start_time = time.time()
 
+    # 创建关键字目录
+    rootdir = utils.project_dir + "/data/keyword_" + keyword + "/"
+    if(not os.path.exists(rootdir)):
+        os.mkdir(rootdir[:-1]) # os.mkdir(rootdir)
 
+    # 获取所有博文组成的DataFrame对象
+    search_result = get_blog_with_mid(mid_list) # 返回所有博文组成的DataFrame
+    if search_result is None or len(search_result) == 0:
+        return None
+    search_result['uid'].dropna(inplace = True) # 在原对象上移除uid空值行
+    #保存搜索微博结果
+    search_result.to_csv(rootdir + keyword + "_search_blog.csv", sep=',',index = False) # 字段分隔符为\001，不保留索引
 
+    # 获取用户信息DataFrame
+    user_result = get_user_infos(search_result['uid'].values)
 
+    # add the directory of blog and follower
+    # user_result['blog_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/blog.csv")
+    user_result['follower_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/followers.csv")
+    # 保存用户信息
+    user_result.to_csv(rootdir + keyword+"_user_info.csv",index = False,sep=',')
 
+    # 为每个用户创建目录
+    for i in user_result.uid.unique():
+        if(not os.path.exists(rootdir + "uid_"+str(i))):
+            os.mkdir(rootdir + "uid_"+str(i))
 
+    # 将关注者信息存入文件
+    get_followers_info(rootdir,  user_result.uid.unique())
 
+    # get_blogs_info(rootdir,user_result.uid.unique())
 
+    # 对搜出的每条微博 爬取转发和评论 存入相应文件
+    for idx in search_result.index:
+        get_repost_info(rootdir, search_result.loc[idx,'uid'], search_result.loc[idx,'mid'], search_result.loc[idx,'reposts_count'])
+        get_comment_info(rootdir, search_result.loc[idx,'uid'], search_result.loc[idx,'mid'], search_result.loc[idx,'comments_count'])
 
-
-
-
-
-
+    #return to the upper folder
+    # os.chdir("..")
+    print("finish scrapy keyword :%s's, using time %d"%(keyword,time.time() - start_time))
+    return None
 
 def scrapy_info(keyword):
     start_time = time.time()
@@ -76,17 +107,16 @@ def scrapy_info(keyword):
         return None
     search_result['uid'].dropna(inplace = True)
     #保存搜索微博结果
-    search_result.to_csv(rootdir + keyword+"_search_blog.csv",sep='\t',index = False)
+    search_result.to_csv(rootdir + keyword+"_search_blog.csv",sep=',',index = False)
     #scrapy user's personal information
     user_result = get_user_infos(search_result['uid'].values)
     #add the directory of blog and follower
     user_result['blog_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/blog.csv")
     user_result['follower_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/followers.csv")
     #save user result
-    user_result.to_csv(rootdir + keyword+"_user_info.csv",index = False,sep='\t')
+    user_result.to_csv(rootdir + keyword+"_user_info.csv",index = False,sep=',')
     #make specific directory for each user
     for i in user_result.uid.unique():
-        print(rootdir + "uid_" + str(i))
         os.mkdir(rootdir + "uid_"+str(i))
     get_followers_info(rootdir,user_result.uid.unique())
     get_blogs_info(rootdir,user_result.uid.unique())
@@ -119,7 +149,7 @@ def scrapy_info_uid(keyword, uid_list):
     uid_list.index = np.arange(len(uid_list))
     user_result = get_user_infos(list(uid_list[0].values))
     user_result['follower_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/followers.csv")
-    user_result.to_csv(rootdir + keyword+"_user_info.csv",index = False,sep='\t')
+    user_result.to_csv(rootdir + keyword+"_user_info.csv",index = False,sep=',')
     for i in user_result.uid.unique():
         # print(rootdir + "uid_" + str(i))
         os.mkdir(rootdir + "uid_"+str(i))
@@ -127,246 +157,94 @@ def scrapy_info_uid(keyword, uid_list):
     print("finish scrapy keyword :%s's, using time %d"%(keyword,time.time() - start_time))
     return None
 
-def scrapy_info_mid(keyword, mid_list):
-    '''
-    scrapy info with bid
-    param:
-        keyword: string
-        bid_list: list or DataFrame
-    '''
-    start_time = time.time()
-    print("scrapy keyword :%s's web info"%(keyword))
-    rootdir = "data/"
-
-    rootdir = rootdir + "keyword_" + keyword + "/"
-    os.mkdir(rootdir[:-1])
-    search_result = get_blog_with_mid(mid_list)
-    if search_result is None or len(search_result) == 0:
-        return None
-    search_result['uid'].dropna(inplace = True)
-    #保存搜索微博结果
-    print(rootdir)
-    search_result.to_csv(rootdir + keyword+"_search_blog.csv",sep='\001',index = False)
-    #scrapy user's personal information
-    user_result = get_user_infos(search_result['uid'].values)
-    #add the directory of blog and follower
-    #############################I delete it
-#    user_result['blog_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/blog.csv")
-    user_result['follower_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/followers.csv")
-    #save user result
-    user_result.to_csv(rootdir + keyword+"_user_info.csv",index = False,sep='\t')
-    #make specific directory for each user
-    for i in user_result.uid.unique():
-        print(rootdir + "uid_" + str(i))
-        os.mkdir(rootdir + "uid_"+str(i))
-    get_followers_info(rootdir,user_result.uid.unique())
-    #############################I delete it
-#    get_blogs_info(rootdir,user_result.uid.unique())
-    # 对搜出的每条微博　爬取转发和评论
-    for idx in search_result.index:
-        get_reposts_info(rootdir, search_result.ix[idx,'uid'], search_result.ix[idx:idx,'mid'], search_result.ix[idx:idx,'reposts_count'])
-        get_comments_info(rootdir, search_result.ix[idx,'uid'], search_result.ix[idx:idx,'mid'], search_result.ix[idx:idx,'comments_count'])
-
-    #return to the upper folder
-    # os.chdir("..")
-    print("finish scrapy keyword :%s's, using time %d"%(keyword,time.time() - start_time))
-    return None
-
-
-
-
+"""
+获取博文信息
+"""
 def get_single_blog_web(mid):
-    url = "https://m.weibo.cn/status/" + mid
+    '''
+    返回该博文HTML页面中的内嵌script代码
+    '''
+    url = "https://m.weibo.cn/status/" + mid # https://m.weibo.cn/detail
     try:
-        bsoj = requests.get(url,utils.headers).content.decode('utf-8','ignore')
-        bsoj = BeautifulSoup(bsoj)
-        return str(bsoj.body.script)
+        resp = requests.get(url,utils.headers)# .content.decode('utf-8','ignore') # 解码utf8，忽略其中有异常的编码，仅显示有效的编码
+        resp.encoding = resp.apparent_encoding
+        soup = BeautifulSoup(resp.text, 'html.parser') # 解析html
+        return str(soup.body.script) # 只会获得第一个script标签
     except:
-        print("Get " + url + "failed")
-        return None
-
+        print("Get " + url + " failed")
+        return ""
 
 def get_single_blog_info(web_str):
+    '''
+    从script字符串中提取出各字段值放入字典并返回字典
+    '''
     tags = ['mid','text','scheme','created_at','source','reposts_count','comments_count','pid']
     user_tags = ['id','screen_name','profile_url','verified_type','verified_reason','description','followers_count','gender']
     # retweeted = ['mid','text']
+
+    # 初始化
     blog = dict()
     for i in tags:
-        blog[i] = ''
-        blog["retweeted_"+i] = ""
+        blog[i] = ""
+        blog["retweeted_"+i] = "" 
     for i in user_tags:
         blog[i] = ""
         blog["retweeted_"+i] = ""
+    
     for i in tags:
-        re_i = re.compile( "\"" +i + "\": (.+),\n")
-        result = re.findall(re_i,web_str)
-        if len(result)>0:
-            # blog[i] = result[0]
-            temp = result[0]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
+        regex = re.compile( "\"" + i + "\": (.+?),\n") # 例："mid": 123,\n，非贪婪匹配模式在量词后加?，直接返回()分组内的匹配内容
+        result = re.findall(regex, web_str) # 返回所有匹配结果的列表
+        # if len(result)>0:
+        #     # blog[i] = result[0]
+        #     temp = result[0]
+        #     if(temp[0] == '"'):
+        #         temp = temp[1:-1]
+        #     blog[i] = temp
+        # if len(result) > 2:
+        #     temp = result[1]
+        #     if(temp[0] == '"'):
+        #         temp = temp[1:-1]
+        #     blog[i] = temp
+        
+        if len(result) > 0:
+            temp = result[0].strip('"')
             blog[i] = temp
-        if len(result) > 2:
-            temp = result[1]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
-            blog[i] = temp
+        if len(result) > 1:
+            temp = result[1].strip('"')
+            blog["retweeted_"+i] = temp
+        
     for i in user_tags:
-        re_i = re.compile("\"" + i + "\":(.+),\n")
-        result = re.findall(re_i,web_str)
+        regex = re.compile("\"" + i + "\": (.+?),\n")
+        result = re.findall(regex, web_str)
         origin_index = 0
         retweeted_index = 1
         if i == 'id':
             origin_index+=1
             retweeted_index+=2
-        if len(result)>0:
-            temp = result[origin_index]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
+        if len(result) > 0:
+            temp = result[origin_index].strip('"')
             blog[i] = temp
-        if len(result)>retweeted_index:
-            temp = result[retweeted_index]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
+        if len(result) > retweeted_index:
+            temp = result[retweeted_index].strip('"')
             blog[i] = temp
+
+    # 处理pid和retweeted_pid字段
     blog.pop('retweeted_pid')
-    if(blog['pid']!=''):   # pid 指照片id 有为1 没有为0
+    if(blog['pid'] != ''):   # pid 指照片id 有为1 没有为0
         blog['pid'] = 1
     else:
         blog['pid'] = 0
-    blog['uid'] = blog['id'][1:]
-    blog.pop('id')
-    blog['retweeted_uid'] = blog['retweeted_id'][1:]
-    blog.pop('retweeted_id')
+
+    # id和retweeted_id改名为uid retweeted_uid
+    blog['uid'] = blog.pop('id')
+    blog['retweeted_uid'] = blog.pop('retweeted_id')
     # blog['bid'] = blog['mid']
     return blog
 
-def scrapy_info_mid(keyword, mid_list):
-    '''
-    scrapy info with bid
-    param:
-        keyword: string
-        bid_list: list or DataFrame
-    '''
-    start_time = time.time()
-    print("scrapy keyword :%s's web info"%(keyword))
-    rootdir = "data/"
-
-    rootdir = rootdir + "keyword_" + keyword + "/"
-    os.mkdir(rootdir[:-1])
-    search_result = get_blog_with_mid(mid_list)
-    if search_result is None or len(search_result) == 0:
-        # os.chdir("..")
-        return None
-    search_result['uid'].dropna(inplace = True)
-    #保存搜索微博结果
-    print(rootdir)
-#    search_result.to_csv(rootdir + keyword+"_search_blog.csv",sep='\001',index = False)
-    #scrapy user's personal information
-    user_result = get_user_infos(search_result['uid'].values)
-    #add the directory of blog and follower
-#    user_result['blog_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/blog.csv")
-#    user_result['follower_dir'] = user_result['uid'].apply(lambda x:"uid_"+str(x)+"/followers.csv")
-    #save user result
-    user_result.to_csv(rootdir + keyword+"_user_info.csv",index = False,sep='\t')
-    #make specific directory for each user
-#    for i in user_result.uid.unique():
-#        print(rootdir + "uid_" + str(i))
-#        os.mkdir(rootdir + "uid_"+str(i))
-#    get_followers_info(rootdir,user_result.uid.unique())
-#    get_blogs_info(rootdir,user_result.uid.unique())
-    # 对搜出的每条微博　爬取转发和评论
-#    for idx in search_result.index:
-#        get_reposts_info(rootdir, search_result.ix[idx,'uid'], search_result.ix[idx:idx,'mid'], search_result.ix[idx:idx,'reposts_count'])
-#        get_comments_info(rootdir, search_result.ix[idx,'uid'], search_result.ix[idx:idx,'mid'], search_result.ix[idx:idx,'comments_count'])
-
-    #return to the upper folder
-    # os.chdir("..")
-    print("finish scrapy keyword :%s's, using time %d"%(keyword,time.time() - start_time))
-    return None
-
-
-
-
-def get_single_blog_web(mid):
-    url = "https://m.weibo.cn/status/" + mid
-    try:
-        bsoj = requests.get(url,utils.headers).content.decode('utf-8','ignore')
-        bsoj = BeautifulSoup(bsoj)
-        return str(bsoj.body.script)
-    except:
-        print("Get " + url + "failed")
-        return None
-
-
-def get_single_blog_info(web_str):
-    tags = ['mid','text','scheme','created_at','source','reposts_count','comments_count','pid']
-    user_tags = ['id','screen_name','profile_url','verified_type','verified_reason','description','followers_count','gender']
-    # retweeted = ['mid','text']
-    blog = dict()
-    for i in tags:
-        blog[i] = ''
-        blog["retweeted_"+i] = ""
-    for i in user_tags:
-        blog[i] = ""
-        blog["retweeted_"+i] = ""
-    for i in tags:
-        re_i = re.compile( "\"" +i + "\": (.+),\n")
-        result = re.findall(re_i,web_str)
-        if len(result)>0:
-            # blog[i] = result[0]
-            temp = result[0]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
-            blog[i] = temp
-        if len(result) > 2:
-            temp = result[1]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
-            blog[i] = temp
-    for i in user_tags:
-        re_i = re.compile("\"" + i + "\":(.+),\n")
-        result = re.findall(re_i,web_str)
-        origin_index = 0
-        retweeted_index = 1
-        if i == 'id':
-            origin_index+=1
-            retweeted_index+=2
-        if len(result)>0:
-            temp = result[origin_index]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
-            blog[i] = temp
-        if len(result)>retweeted_index:
-            temp = result[retweeted_index]
-            if(temp[0] == '"'):
-                temp = temp[1:-1]
-            blog[i] = temp
-    blog.pop('retweeted_pid')
-    if(blog['pid']!=''):   # pid 指照片id 有为1 没有为0
-        blog['pid'] = 1
-    else:
-        blog['pid'] = 0
-    blog['uid'] = blog['id'][1:]
-    blog.pop('id')
-    blog['retweeted_uid'] = blog['retweeted_id'][1:]
-    blog.pop('retweeted_id')
-    # blog['bid'] = blog['mid']
-    return blog
-
-
 def get_blog_with_mid(mid_list):
-    blogs = []
-    for i in mid_list:
-        web_str = get_single_blog_web(i)
-        blog = get_single_blog_info(web_str)
-        if blog['mid'] != '':
-            blogs.append(blog)
-        else:
-            print("get %s blog information failed"%(i))
-    return pd.DataFrame(blogs)	
-
-def get_blog_with_mid(mid_list):
+    '''
+    通过mid_list获取博文提取的关键字段字典列表，并转化为DataFrame返回
+    '''
     blogs = []
     for i in mid_list:
         web_str = get_single_blog_web(i)
@@ -377,33 +255,30 @@ def get_blog_with_mid(mid_list):
             print("get %s blog information failed"%(i))
     return pd.DataFrame(blogs)
 
-
 def get_info(url,headers):
     """
+    返回url响应报文content转化得的字典对象
     use requests to scrapy the web page
     url : the url you want to scrapy    -- type:"str"
     headers : scrapy engine headers, need have your own cookie   --- type:"dict"
     """
     # print(url)
     try:
-        content = requests.get(url,headers = headers,timeout = 500)
+        resp = requests.get(url,headers = headers,timeout = 500)
         # print(content.content)
-        json_file = content.content.decode('utf-8','ignore')
+        json_str = resp.content.decode('utf-8','ignore')
         # print(content)
         # print(json_file)
-        json_file = json.loads(json_file)
+        json_dict = json.loads(json_str) # 将字符串转化为字典
         # print(json_file)
-        time.sleep(0.5)
-        return json_file
+        time.sleep(0.5) # 为了避免反爬机制？
+        return json_dict
     except:
         """
         if error return None and print the url
         """
         print("Get" + url + " failed")
         return None
-
-
-
 
 def get_search_web(keyword, page):
     """
@@ -417,9 +292,6 @@ def get_search_web(keyword, page):
                     "&containerid=100103type%3D1%26q%3D" + keyword  + "&page=" + page   +  "&display=0&retcode=6102&#39;"
 
     return get_info(search_url, utils.headers)
-
-
-
 
 def decode_search_info(json_file):
     """
@@ -515,104 +387,85 @@ def get_search( keyword):
         return search_blog
 
 
-
-
-
-
-
-
 """
 user 相关函数为爬取用户个人信息
 """
-
-
-
 def get_user_web(uid):
     """
     uid 为用户id, 设置对应url
-    返回爬取的json 文件
+    返回爬取的json转化得的字典对象
     """
     uid = str(uid)
     user_url = "https://m.weibo.cn/api/container/getIndex?containerid=230283" + uid + \
         "_-_INFO&lfid=230283" + uid + "&display=0&retcode=6102&#39";
-    json_file = get_info(user_url,headers = utils.headers)
-    return json_file
+    json_dict = get_info(user_url,headers = utils.headers)
+    return json_dict
 
-
-def decode_user_info(json_file):
+def decode_user_info(json_dict):
     """
-    解析json 文件
+    提取json对象中的关键信息，返回字典
     """
-
     info_list = ['昵称','注册时间','简介','性别', '年龄','所在地','微信号','is_V','v_简介','标签','教育经历']   # 需要获取的数据
     info_dict = {}
     for i in info_list:
         info_dict[i] = ''
-    if json_file == None:
+    if json_dict == None:
         return info_dict
-    a = json_file['data']['cards']
-    info_dict['is_V'] = '0'
-    for i in a:
+    cards_list = json_dict['data']['cards']
+    info_dict['is_V'] = 0
+    for i in cards_list:
         if 'card_group' in i.keys():
             sub_description = i['card_group']
             for j in sub_description:
                 if('item_type' in j.keys() and j['item_type'] == 'verify_yellow'):
-                    info_dict['is_V'] = '1'   #大V标志的格式在json文件中与其他不同
+                    info_dict['is_V'] = 1   #大V标志的格式在json文件中与其他不同
                     info_dict['v_简介'] = j['item_content']
                 if 'item_name' in j.keys():
                     for info in info_list:
-                        if j['item_name'] == info:
+                        if (j['item_name'] == info):
                             info_dict[info] = j['item_content']
     return info_dict
 
 def get_basic_user_web(uid):
+    '''
+    返回用户基本信息的JSON字符串
+    '''
     uid = str(uid)
     user_url = "https://m.weibo.cn/api/container/getIndex?type=uid&value=" + uid + \
     "&containerid=100505" + uid
     try:
-        content = requests.get(user_url,utils.headers)
-        content = content.content.decode('utf-8','ignore')
+        resp = requests.get(user_url,utils.headers)
+        content = resp.content.decode('utf-8','ignore')
         return content
     except:
         print("get %s user's basic info failed"%(uid))
         return None
 
-
 def get_user_basic_info(uid):
+    '''
+    返回uid用户的follow_count、followers_count信息组成的字典
+    '''
+    # 初始化
     user_info = {}
     keywords = ['follow_count','followers_count']
     for i in keywords:
         user_info[i] = ''
+
     content = get_basic_user_web(uid)
     if content == None:
         return
     else:
         for i in keywords:
-            re_precompile = '"' + i + '":([0-9]+),'
+            re_precompile = '"' + i + '":([0-9]+),' # "follow_count":123,
             re_keyword = re.compile(re_precompile)
-            result = re.findall(re_keyword,content)
+            result = re.findall(re_keyword, content)
             if len(result) >0:
                 user_info[i] = result[0]
         return user_info
 
-#def get_user_info(uid):
-#    """
-#    获取单个用户的信息
-#    """
-#    user_url = "https://m.weibo.cn/u/"+str(uid)   # 加一个用户主页的网址
-#    # try:
-#    #     requests.get(usr_url)
-#    # except:
-#    #     pass
-#    json_file = get_user_web(uid)
-#    user_dict = decode_user_info(json_file)
-#    user_dict['uid'] = uid
-#    user_dict['url'] = user_url
-#    return user_dict
-
 def get_user_info(uid):
     """
-    获取单个用户的信息
+    获取单个用户的信息，返回字典
     """
     # if(type(uid)==str)
     user_url = "https://m.weibo.cn/u/"+str(uid)   # 加一个用户主页的网址
@@ -621,8 +474,8 @@ def get_user_info(uid):
     # except:
     #     pass
     user_basic_info = get_user_basic_info(uid)
-    json_file = get_user_web(uid)
-    user_dict = decode_user_info(json_file)
+    json_dict = get_user_web(uid)
+    user_dict = decode_user_info(json_dict)
     user_dict['uid'] = uid
     user_dict['url'] = user_url
     for i in user_basic_info.keys():
@@ -631,43 +484,41 @@ def get_user_info(uid):
 
 def get_user_infos(uid_list):
     """
-    获取多个用户的信息
+    获取多个用户的信息，返回DataFrame对象
     """
-
-    uid_list = set(uid_list)
+    uid_list = set(uid_list) # 无序不重复元素集
     user_infos = []
     for i in uid_list:
         user_infos.append(get_user_info(i))
     return pd.DataFrame(user_infos)
 
+
 """
 follower 相关函数为爬取单个用户的关注人
 并按是否是大V以及粉丝数量排序,最后输出一个 DataFrame 矩阵
 """
-
-
 def get_follower_web(uid,page):
     """
-    根据 uid 和页数设置url 返回json数据
+    根据 uid 和页数设置url 返回url响应报文content转化得的字典对象
     """
     uid = str(uid)
     page = str(page)
     follwer_url = "https://m.weibo.cn/api/container/getIndex?containerid=231051_-_followers_-_" + uid + \
                     "&luicode=10000011&lfid=100505" + uid + \
                     "&featurecode=20000320&page=" + page + "&display=0&retcode=6102&#39;"
-    return get_info(follwer_url,utils.headers)
+    return get_info(follwer_url, utils.headers)
 
-
-def decode_follower_info(uid,json_file):
+def decode_follower_info(uid,json_dict):
     """
-    解析json 数据 爬取 关注人的:uid, 个人描述 , 昵称, 是否是大V, 大V认证原因, 粉丝数量
+    解析json数据 爬取关注人的:uid, 个人描述 , 昵称, 是否是大V, 大V认证原因, 粉丝数量
+    返回各关注者关键信息的字典组成的列表
     """
     followers = []
-    if  (json_file is None) or "cards" not in json_file.keys():
+    if  (json_dict is None) or "cards" not in json_dict.keys():
         return followers
-    json_file = json_file['cards']
-    if(len(json_file) > 0):
-        a = json_file[0]
+    cards_list = json_dict['cards']
+    if(len(cards_list) > 0):
+        a = cards_list[0]
         for i in a['card_group']:
             follower = {}
             follower['followed_uid'] = uid
@@ -687,17 +538,19 @@ def decode_follower_info(uid,json_file):
 
 def get_follower_info(rootdir, uid):
     """
-    爬取单个uid的关注者信息, 但因为关注者第一页跟第二页及以后返回的json数据不同,因此第一页单独分析
-    并保存到每个uid 的文件夹中
+    爬取单个uid的所有关注者信息, 但因为关注者第一页跟第二页及以后返回的json数据不同,因此第一页单独分析
+    将关注者信息保存到每个uid的文件夹中
+    返回关注者信息的DataFrame对象
     """
     headers = utils.headers
     uid = str(uid)
     followers = []
     page = 1
-    json_file = get_follower_web(uid,page)
-    json_file = json_file['data']['cards']
-    for i in json_file:
-        # print(i)
+
+    # 获取第1页的关注者数据
+    json_dict = get_follower_web(uid,page)
+    cards_list = json_dict['data']['cards']
+    for i in cards_list:
         if 'title' in i.keys() and i['title'][-4:] =="全部关注":
             for j in i['card_group']:
                 follower = {}
@@ -705,47 +558,58 @@ def get_follower_info(rootdir, uid):
                 follower['follower_uid'] = j['user']['id']
                 follower['description'] = j['user']['description']
                 follower['name'] = j['user']['screen_name']
-                if(j['user']['verified'] == True):
+                if(j['user']['verified'] == True): # json字符串在转化为Python字典对象时json.loads()会把true值转化为True
                     follower['is_V'] = 1
                     if 'verified_reason' in j['user'].keys():
                         follower['v_description'] = j['user']['verified_reason']
                     else:
-                        follower['is_V'] = 0
                         follower['v_description'] = ''
+                else:
+                    follower['is_V'] = 0
+                    follower['v_description'] = ''
                 follower['followers_count'] = j['user']['followers_count']
                 followers.append(follower)
     if(len(followers)) == 0:
         return None
 
-    #第二页的内容有
-    page = 3
+    #第二页及以后页的关注者数据添加进followers数组内
+    page = 2
     while(True):
-        json_file = get_follower_web(uid,page)
-        # print(json_file)
-        new_follower = decode_follower_info(uid,json_file)
-        if(len(new_follower)==0):
+        json_dict = get_follower_web(uid, page)
+        new_followers = decode_follower_info(uid, json_dict)
+        if(len(new_followers)==0):
             break
         else:
-            followers.extend(new_follower)
+            followers.extend(new_followers)
         page+=1
+
+    # 转化为DataFrame对象
     followers = pd.DataFrame(followers)
     if not os.path.exists(rootdir + "uid_"+uid) :
         os.mkdir(rootdir + "uid_"+uid)
+
+    # 选取指定列
     followers = followers[['followed_uid','follower_uid','description','name','is_V','v_description','followers_count']]
-#    folloers = followers.sort_values(by=['is_V','followers_count'],ascending=False)
-    followers.to_csv(rootdir + "uid_"+str(uid)+"/followers.csv",sep='\t',index=False)
+    # followers = followers.sort_values(by=['is_V','followers_count'],ascending=False)
+    # 写入文件
+    followers.to_csv(rootdir + "uid_"+str(uid)+"/followers.csv",sep=',',index=False)
     return followers
 
 def get_followers_info(rootdir,uid_list):
+    '''
+    没有返回值，将关注者信息都存入相应的文件内
+    '''
     print("Begin scrapy followers info")
     uid_list = set(uid_list)
     for i in uid_list:
-        followers = get_follower_info(rootdir, i)
+        get_follower_info(rootdir, i)
         time.sleep(1)
     return None
 
 
-
+"""
+获取每个用户的blog信息，主函数中暂时舍弃，还未作修改
+"""
 def get_blog_web(uid,page):
     """
     uid : 用户id
@@ -760,8 +624,6 @@ def get_blog_web(uid,page):
         blog_url = blog_url + "&page=" + page
     blog_url +="&display=0&retcode=6102&#39;"
     return get_info(blog_url,utils.headers)
-
-
 
 def decode_blog_info(uid,json_file):
     """
@@ -823,7 +685,6 @@ def decode_blog_info(uid,json_file):
 
     return blogs
 
-
 def get_blog_info(rootdir, uid):
     """
     获取一个人的微博
@@ -847,13 +708,12 @@ def get_blog_info(rootdir, uid):
         time.sleep(1)
     #保存
     blogs= pd.DataFrame(blogs)
-    blogs.to_csv(rootdir + "uid_"+str(uid)+"/blog.csv",sep = '\001',index = False)
+    blogs.to_csv(rootdir + "uid_"+str(uid)+"/blog.csv",sep = ',',index = False)
 
     # get_reposts_info(uid,blogs['mid'].values,blogs['reposts_count'].values,headers)
     print("Finish scrapy uid %s's blog information,using time:%d"%(str(uid),time.time() - start_time))
 
     return blogs
-
 
 def get_blogs_info(rootdir, uid_list):
     """
@@ -867,32 +727,38 @@ def get_blogs_info(rootdir, uid_list):
     return None
 
 
-def get_repost_web(bid,page):
-    bid = str(bid)
+"""
+获取每个博文的转发信息
+"""
+def get_repost_web(mid,page):
+    '''
+    返回转发信息 JSON响应报文转化得的字典对象
+    '''
+    mid = str(mid)
     page = str(page)
-    reposts_url = "https://m.weibo.cn/api/statuses/repostTimeline?id=" + bid + \
+    reposts_url = "https://m.weibo.cn/api/statuses/repostTimeline?id=" + mid + \
                 "&page=" + page + "&display=0&retcode=6102&#39;"
     return get_info(reposts_url,utils.headers)
 
-
-def decode_reposts_info(bid,json_file):
+def decode_reposts_info(mid,json_dict):
     """
-    解析转发的json文件
+    解析转发的json文件，返回包含各转发关键字段的字典列表
     """
     reposts = []
-    if(json_file == None):
+
+    # 没有所需字段时返回空列表
+    if(json_dict == None):
         return reposts
-    if('data' not in json_file.keys()):
-        print(json_file)
+    if('data' not in json_dict.keys()):
         return reposts
-    json_file = json_file['data']['data']
-    if(len(json_file) == 0):
+    data_list = json_dict['data']['data']
+    if(len(data_list) == 0):
         return reposts
-    for i in json_file:
+
+    for i in data_list:
         repost = {}
-        repost['bid'] = bid
+        repost['mid'] = mid
         repost['created_at'] = i['created_at']
-        # if(re.findal)
         repost['repost_id'] = i['id']
         repost['uid'] = i['user']['id']
         repost['user_name'] = i['user']['screen_name']
@@ -903,116 +769,97 @@ def decode_reposts_info(bid,json_file):
         reposts.append(repost)
     return reposts
 
-
-def get_repost_info(bid):
+def get_repost_info(rootdir,uid,mid,reposts_count):
     """
-    获取一条微博的转发
+    获取一条微博的转发信息并存入文件，循环条件处有优化空间
     """
     page = 1
     reposts = []
-    while(True):
-        if(len(reposts) > utils.limit):
-            break
-        json_file = get_repost_web(bid,page)
-        new_repost = decode_reposts_info(bid,json_file)
-        if len(new_repost)==0:
-            break
-        else:
-            reposts.extend(new_repost)
-        page+=1
-    return reposts
 
+    if(reposts_count != 0):
+        while(True):
+            if(len(reposts) > utils.limit):
+                break
+            json_dict = get_repost_web(mid,page)
+            new_repost = decode_reposts_info(mid,json_dict)
+            if len(new_repost)==0:
+                break
+            else:
+                reposts.extend(new_repost)
+            page+=1
 
-def get_reposts_info(rootdir,uid,bid_list,reposts_count):
-    """
-    获取多条微博的转发,
-    bid_list存微博的数目 type 为 DataFrame
-    reposts_count为 每条微博的转发数目,等于0 则不获取
-    """
-    reposts = []
-    for idx in bid_list.index:
-        bid = bid_list.ix[idx,'bid']
-        if(reposts_count[idx]==0):
-            continue
-        reposts.extend(get_repost_info(bid))
-        # time.sleep(5)
     reposts = pd.DataFrame(reposts)
-    if(len(bid_list) == 1):
-        bid = bid_list.ix[bid_list.index[0],'bid']
-        reposts.to_csv(rootdir + "uid_"+str(uid)+"/blog_reposts_bid_" + bid + ".csv",sep='\001',index=False)
-    else:
-        reposts.to_csv(rootdir + "uid_"+str(uid)+"/blog_reposts.csv",sep='\001',index=False)
+    reposts.to_csv(rootdir + "uid_"+str(uid)+"/blog_reposts_mid_" + mid + ".csv",sep=',',index=False)
     return None
 
 
-
-def get_comment_web(bid, page):
-    bid = str(bid)
+"""
+获取每个博文的评论信息
+"""
+def get_comment_web(mid, page):
+    '''
+    返回评论信息 JSON响应报文转化得的字典对象
+    '''
+    mid = str(mid)
     page = str(page)
-    comments_url = "https://m.weibo.cn/api/comments/show?id=" + bid + \
+    comments_url = "https://m.weibo.cn/api/comments/show?id=" + mid + \
                 "&page=" + page + "&display=0&retcode=6102&#39;"
-
     return get_info(comments_url,utils.headers)
 
-def decode_comments_info(bid,json_file):
+def decode_comments_info(mid,json_dict):
+    """
+    解析转发的json文件，返回包含各转发关键字段的字典列表
+    """
     comments = []
-    if(json_file == None):
+
+    # 没有所需字段时返回空列表
+    if(json_dict == None):
         return comments
-    if('data' not in json_file.keys()):
-        print(json_file)
+    if('data' not in json_dict.keys()):
+        return comments
+    data_list = json_dict['data']['data']
+    if(len(data_list) == 0):
         return comments
 
-    json_file = json_file['data']['data']
-    if(len(json_file) == 0):
-        return comments
-    for i in json_file:
+    for i in data_list:
         comment = {}
-        comment['bid'] = bid
+        comment['mid'] = mid
         comment['created_at'] = i['created_at']
         # if len(re.findall(utils.re_limited_time,comment['created_at'])) > 0:
         #     continue
         comment['comment_id'] = i['id']
         comment['uid'] = i['user']['id']
-        # comment['user_name'] = i['user']['name']
-        if 'raw_text' in i.keys():
-            comment['text'] = i['raw_text']
-        else:
-            comment['text'] = i['text']
+        comment['user_name'] = i['user']['screen_name']
+        # if 'raw_text' in i.keys():
+        #     comment['text'] = i['raw_text']
+        # else:
+        #     comment['text'] = i['text']
         comments.append(comment)
     return comments
 
-
-def get_comment_info(bid):
+def get_comment_info(rootdir, uid, mid, comments_count):
+    """
+    获取一条微博的评论信息并存入文件，循环条件处有优化空间
+    """
     page = 1
     comments = []
-    while(True):
-        if(len(comments) > utils.limit):
-            break
-        json_file = get_comment_web(bid,page)
-        # print(json_file)
-        new_comment = decode_comments_info(bid, json_file)
-        if len(new_comment) == 0:
-            break
-        else:
-            comments.extend(new_comment)
-        page+=1
-    return comments
 
-def get_comments_info(rootdir, uid, bid_list, comments_count):
-    comments = []
-    for idx in bid_list.index:
-        bid = bid_list.ix[idx,'bid']
-        if(comments_count[idx] == 0):
-            continue
-        comments.extend(get_comment_info(bid))
+    if(comments_count != 0):
+        while(True):
+            if(len(comments) > utils.limit):
+                break
+            json_dict = get_comment_web(mid,page)
+            new_comment = decode_comments_info(mid, json_dict)
+            if len(new_comment) == 0:
+                break
+            else:
+                comments.extend(new_comment)
+            page+=1
+
     comments = pd.DataFrame(comments)
-    # comments = pd.DataFrame(comments)
-    if(len(bid_list) == 1):
-        bid = bid_list.ix[bid_list.index[0]]
-        comments.to_csv(rootdir + "uid_"+str(uid) + "/blog_comments_bid_" + bid + ".csv", sep='\001',index = False)
-    else:
-        comments.to_csv(rootdir + "uid_"+str(uid) + "/blog_comments.csv", sep='\001',index = False)
+    comments.to_csv(rootdir + "uid_"+str(uid) + "/blog_comments_mid_" + mid + ".csv", sep=',',index = False)
     return None
+
 #
 #
 # keyword = 'dota2'
